@@ -1,0 +1,34 @@
+version: "3.7"
+
+services:
+  server:
+    build: ./
+    container_name: diplomacloudstorage-server
+    networks:
+      - default
+    environment:
+      spring.datasource.url: jdbc:postgresql://db:5432/cloudStorage
+      spring.jpa.showSql: false
+      spring.sql.init.mode: always
+
+      spring.servlet.multipart.max-file-size: 50MB
+      spring.servlet.multipart.max-request-size: 50MB
+    ports:
+      - "8082:8081"
+    depends_on:
+      - db
+  db:
+    image: "postgres:15-alpine"
+    container_name: db
+    networks:
+      - default
+    environment:
+      POSTGRES_DB: "diplomaCloudStorage"
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "postgres"
+    ports:
+      - "5432:5432"
+
+networks:
+  default:
+    driver: bridge
