@@ -1,20 +1,38 @@
 package ru.netology.diplomaCloudStorage.entity;
 
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
 
-import javax.persistence.Entity;
-import javax.persistence.Id;
-import javax.persistence.Table;
+import javax.persistence.*;
 
-@Entity
-@Table(name = "files")
 @Data
-@NoArgsConstructor
 @AllArgsConstructor
+@NoArgsConstructor
+@Builder
+@Entity
+@Table(name = "files", schema = "public")
 public class FileEntity {
+    @Getter
     @Id
-    private String fileName;
-    private byte[] fileContent;
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(nullable = false, unique = true)
+    private Long id;
+
+    @Setter
+    @Getter
+    @Column(nullable = false)
+    private String name;
+
+    @Getter
+    @Column(nullable = false)
+    private byte[] content;
+
+    @ManyToOne
+    @JoinColumn(name = "userId", nullable = false)
+    private UserEntity user;
+
+    public FileEntity(String name, byte[] content, UserEntity user) {
+        this.name = name;
+        this.content = content;
+        this.user = user;
+    }
 }
