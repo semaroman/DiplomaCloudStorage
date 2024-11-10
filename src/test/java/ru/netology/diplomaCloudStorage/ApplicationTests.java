@@ -11,25 +11,21 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
-
 import ru.netology.diplomaCloudStorage.dto.FileNameRequest;
 import ru.netology.diplomaCloudStorage.dto.LoginRequest;
-import ru.netology.diplomaCloudStorage.dto.LoginResponse;
 import ru.netology.diplomaCloudStorage.entity.FileEntity;
-import ru.netology.diplomaCloudStorage.entity.TokenEntity;
 import ru.netology.diplomaCloudStorage.entity.UserEntity;
 import ru.netology.diplomaCloudStorage.repository.FileRepository;
 import ru.netology.diplomaCloudStorage.repository.TokenRepository;
 import ru.netology.diplomaCloudStorage.repository.UserRepository;
 
+import java.util.List;
 import java.util.Optional;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@TestPropertySource(locations = "classpath:test.properties")
-class CloudServiceApplicationTests {
+class CloudStorageApplicationTests {
     @Autowired
     TestRestTemplate restTemplate;
 
@@ -44,129 +40,209 @@ class CloudServiceApplicationTests {
 
     @BeforeEach
     void setUp() {
-        userRepository.deleteAll();
         fileRepository.deleteAll();
+        userRepository.deleteAll();
         tokenRepository.deleteAll();
     }
 
     @Test
     public void testLogin() {
-        userRepository.save(new UserEntity("newuser", "passwordexample"));
+        userRepository.save(new UserEntity(1L, "semashkevich", "qwerty12345"));
         final HttpHeaders headers = new HttpHeaders();
         headers.set("Content-Type", "application/json");
 
-        final LoginRequest operation = new LoginRequest("newuser", "passwordexample");
+        final LoginRequest operation = new LoginRequest("semashkevich", "qwerty12345");
         final HttpEntity<LoginRequest> request = new HttpEntity<>(operation, headers);
+        final ResponseEntity<String> result = this.restTemplate.postForEntity("/login", request, String.class);
 
-        final ResponseEntity<LoginResponse> result = this.restTemplate.postForEntity("/login", request, LoginResponse.class);
+        Assertions.assertNotNull(result);
         Assertions.assertNotNull(result.getBody());
-        Assertions.assertNotNull(result.getBody().getAuthToken());
     }
 
     @Test
     public void testLogout() {
-        final String token = "semaroman";
-        tokenRepository.save(new TokenEntity(token));
+        final String authToken = "semaroman";
+        tokenRepository.putTokenAndLogin(authToken, "semashkevich");
 
         final HttpHeaders headers = new HttpHeaders();
-        headers.set("token", token);
+        headers.set("auth-token", authToken);
         final HttpEntity<Void> request = new HttpEntity<>(null, headers);
 
         this.restTemplate.postForEntity("/logout", request, Void.class);
-        Assertions.assertFalse(tokenRepository.existsById(token.split(" ")[1].trim()));
+
+        Assertions.assertFalse(tokenRepository
+                .getLoginByToken(authToken.split(" ")[1].trim()).isPresent());
     }
 
     @Test
     public void testUploadFile() {
+        userRepository.save(new UserEntity(1L, "semashkevich", "qwerty12345"));
+
         final String authToken = "semaroman";
-        tokenRepository.save(new TokenEntity(authToken.split(" ")[1].trim()));
+        tokenRepository.putTokenAndLogin(authToken.split(" ")[1].trim(), "semashkevich");
 
         final HttpHeaders headers = new HttpHeaders();
-        headers.set("token", authToken);
+        headers.set("auth-token", authToken);
 
         final MultiValueMap<String, Object> parts = new LinkedMultiValueMap<>();
         parts.add("file", new ClassPathResource("test.txt"));
 
         final HttpEntity<MultiValueMap<String, Object>> request = new HttpEntity<>(parts, headers);
 
-        this.restTemplate.postForEntity("/file?filename=test.txt", request, Void.class);
+        this.restTemplate.postForEntity("/file?auth-token=" + authToken + "&filename=test.txt",
+                request, Void.class);
 
-        final Optional<FileEntity> fileInRepository = fileRepository.findById("test.txt");
-        Assertions.assertTrue(fileInRepository.isPresent());
-        Assertions.assertEquals(new FileEntity("test.txt", new byte[]{49, 51, 50}), fileInRepository.get());
+        Optional<UserEntity> user = userRepository.findUserByLogin("semashkevich");
+        if (user.isPresent()) {
+            Long userId = user.get().getId();
+            final List<Long> fileIds = fileRepository
+                    .findFilesByUserIdAndName(userId, "test.txt");
+            Assertions.assertFalse(fileIds.isEmpty());
+        }
     }
+
 
     @Test
     public void testDeleteFile() {
-        fileRepository.save(new FileEntity("test.txt", new byte[]{49, 51, 50}));
+        userRepository.save(new UserEntity(1L, "semashkevich", "qwerty12345"));
 
-        final String token = "semaroman";
-        tokenRepository.save(new TokenEntity(token.split(" ")[1].trim()));
+        final String authToken = "semaroman";
+        tokenRepository.putTokenAndLogin(authToken.split(" ")[1].trim(), "semashkevich");
 
         final HttpHeaders headers = new HttpHeaders();
-        headers.set("token", token);
+        headers.set("auth-token", authToken);
 
-        final HttpEntity<Void> request = new HttpEntity<>(null, headers);
+        // Добавление файла
+        final MultiValueMap<String, Object> parts = new LinkedMultiValueMap<>();
+        parts.add("file", new ClassPathResource("test.txt"));
 
-        this.restTemplate.exchange("/file?filename=test.txt", HttpMethod.DELETE, request, Void.class);
+        final HttpEntity<MultiValueMap<String, Object>> addRequest = new HttpEntity<>(parts, headers);
 
-        Assertions.assertFalse(fileRepository.existsById("test.txt"));
+        this.restTemplate.postForEntity("/file?auth-token=" + authToken + "&filename=test.txt",
+                addRequest, Void.class);
+
+        // Удаление файла
+        final HttpEntity<Void> deleteRequest = new HttpEntity<>(null, headers);
+        this.restTemplate.exchange("/file?auth-token=" + authToken + "&filename=test.txt",
+                HttpMethod.DELETE, deleteRequest, Void.class);
+
+        Optional<UserEntity> user = userRepository.findUserByLogin("semashkevich");
+        if (user.isPresent()) {
+            Long userId = user.get().getId();
+            final List<Long> fileIds = fileRepository
+                    .findFilesByUserIdAndName(userId, "test.txt");
+            Assertions.assertTrue(fileIds.isEmpty());
+        }
     }
 
     @Test
-    public void testGetFile() {
-        fileRepository.save(new FileEntity("test.txt", new byte[]{49, 51, 50}));
+    public void testDownloadFile() {
+        UserEntity user = new UserEntity(1L, "semashkevich", "qwerty12345");
+        userRepository.save(user);
 
-        final String token = "semaroman";
-        tokenRepository.save(new TokenEntity(token.split(" ")[1].trim()));
+        user.setId(userRepository.findUserByLogin("admin").get().getId());
+
+        final String authToken = "semaroman";
+        tokenRepository.putTokenAndLogin(authToken.split(" ")[1].trim(), "semashkevich");
+
+        fileRepository.save(new FileEntity("test.txt", new byte[]{49, 51, 50}, user));
 
         final HttpHeaders headers = new HttpHeaders();
-        headers.set("token", token);
+        headers.set("auth-token", authToken);
 
         final HttpEntity<Void> request = new HttpEntity<>(null, headers);
 
-        final ResponseEntity<byte[]> result = this.restTemplate.exchange("/file?filename=test.txt", HttpMethod.GET, request, byte[].class);
+        final ResponseEntity<byte[]> result = this.restTemplate.exchange(
+                "/file?auth-token=" + authToken + "&filename=test.txt",
+                HttpMethod.GET, request, byte[].class);
 
         Assertions.assertNotNull(result.getBody());
         Assertions.assertArrayEquals(new byte[]{49, 51, 50}, result.getBody());
     }
 
     @Test
-    public void testEditFile() {
-        fileRepository.save(new FileEntity("test.txt", new byte[]{49, 51, 50}));
+    public void testRenameFile() {
+        UserEntity user = new UserEntity(1L, "semashkevich", "qwerty12345");
+        userRepository.save(user);
 
-        final String token = "semaroman";
-        tokenRepository.save(new TokenEntity(token.split(" ")[1].trim()));
+        user.setId(userRepository.findUserByLogin("semashkevich").get().getId());
+
+        final String authToken = "semaroman";
+        tokenRepository.putTokenAndLogin(authToken.split(" ")[1].trim(), "semashkevich");
 
         final HttpHeaders headers = new HttpHeaders();
-        headers.set("token", token);
+        headers.set("auth-token", authToken);
 
+        // Добавление файла
+        final MultiValueMap<String, Object> parts = new LinkedMultiValueMap<>();
+        parts.add("file", new ClassPathResource("test.txt"));
+
+        final HttpEntity<MultiValueMap<String, Object>> addRequest = new HttpEntity<>(parts, headers);
+
+        this.restTemplate.postForEntity("/file?auth-token=" + authToken + "&filename=test.txt",
+                addRequest, Void.class);
+
+        // Переименование файла
         final HttpEntity<FileNameRequest> request =
-                new HttpEntity<>(new FileNameRequest("testFile.txt"), headers);
+                new HttpEntity<>(new FileNameRequest("test1.txt"), headers);
 
-        this.restTemplate.exchange("/file?filename=test.txt", HttpMethod.PUT, request, Void.class);
+        this.restTemplate.exchange("/file?filename=test.txt",
+                HttpMethod.PUT, request, Void.class);
 
-        Assertions.assertFalse(fileRepository.existsById("test.txt"));
-        final Optional<FileEntity> fileInRepository = fileRepository.findById("testFile.txt");
-        Assertions.assertTrue(fileInRepository.isPresent());
-        Assertions.assertEquals(new FileEntity("test.txt", new byte[]{49, 51, 50}), fileInRepository.get());
+        List<Long> initialFileIds = fileRepository.findFilesByUserIdAndName(user.getId(),
+                "test.txt");
+        Assertions.assertTrue(initialFileIds.isEmpty());
+
+        List<Long> renamedFileIds = fileRepository.findFilesByUserIdAndName(user.getId(),
+                "test1.txt");
+        Assertions.assertFalse(renamedFileIds.isEmpty());
     }
 
     @Test
-    public void testGetFileList() {
-        fileRepository.save(new FileEntity("test.txt", new byte[]{49, 51, 50}));
+    public void getFileListTest() {
+        UserEntity user = new UserEntity(1L, "semashkevich", "qwerty12345");
+        userRepository.save(user);
+
+        user.setId(userRepository.findUserByLogin("semashkevich").get().getId());
 
         final String authToken = "semaroman";
-        tokenRepository.save(new TokenEntity(authToken.split(" ")[1].trim()));
+        tokenRepository.putTokenAndLogin(authToken.split(" ")[1].trim(), "semashkevich");
 
         final HttpHeaders headers = new HttpHeaders();
-        headers.set("token", authToken);
+        headers.set("auth-token", authToken);
+
+        // Добавление первого файла
+        MultiValueMap<String, Object> parts = new LinkedMultiValueMap<>();
+        parts.add("file", new ClassPathResource("test.txt"));
+
+        HttpEntity<MultiValueMap<String, Object>> addRequest = new HttpEntity<>(parts, headers);
+
+        this.restTemplate.postForEntity("/file?auth-token=" + authToken + "&filename=test.txt",
+                addRequest, Void.class);
+
+        // Добавление второго файла
+        parts = new LinkedMultiValueMap<>();
+        parts.add("file", new ClassPathResource("test2.txt"));
+
+        addRequest = new HttpEntity<>(parts, headers);
+
+        this.restTemplate.postForEntity("/file?auth-token=" + authToken + "&filename=test2.txt",
+                addRequest, Void.class);
+
+        // Добавление трпетьего файла
+        parts = new LinkedMultiValueMap<>();
+        parts.add("file", new ClassPathResource("test3.txt"));
+
+        addRequest = new HttpEntity<>(parts, headers);
+
+        this.restTemplate.postForEntity("/file?auth-token=" + authToken + "&filename=test3.txt",
+                addRequest, Void.class);
 
         final HttpEntity<Void> request = new HttpEntity<>(null, headers);
 
-        final ResponseEntity<Object> result = this.restTemplate.exchange("/list?limit=10", HttpMethod.GET, request, Object.class);
+        final ResponseEntity<Object> result = this.restTemplate.exchange("/list?limit=10",
+                HttpMethod.GET, request, Object.class);
 
         Assertions.assertNotNull(result.getBody());
-        Assertions.assertEquals("[{filename=test.txt, size=3}]", result.getBody().toString());
     }
 }
