@@ -3,20 +3,25 @@ package ru.netology.diplomaCloudStorage.service;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
-import ru.netology.diplomaCloudStorage.dto.FileDescriptionResponse;
 import ru.netology.diplomaCloudStorage.entity.FileEntity;
+import ru.netology.diplomaCloudStorage.entity.UserEntity;
 import ru.netology.diplomaCloudStorage.repository.FileRepository;
 
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 
 import static org.mockito.Mockito.when;
 
-class FileServiceTest {
-    public static final String FILE_EXISTS = "fileExists";
-    public static final String FILE_IS_NOT_EXISTS = "fileIsNotExists";
+public class FileServiceTest {
+    public static final Long ID = 1L;
+    public static final String FILE = "file";
+    public static final String UNEXISTING_FILE = "unexistingFile";
 
-    private final FileEntity existingFileEntity = new FileEntity(FILE_EXISTS, new byte[]{0, 1, 2});
+    private final UserEntity user = new UserEntity(1L, "semashkevich", "qwerty12345");
+    private final FileEntity file = new FileEntity(1L, FILE, new byte[]{0, 1, 2}, user);
+    private final Long fileId = Long.parseLong(file.getId().toString());
+    private final Long unexistingFileId = 100L;
+
 
     private final FileRepository fileRepository = createFileRepositoryMock();
     private final FileService fileService = new FileService(fileRepository);
@@ -24,53 +29,74 @@ class FileServiceTest {
     private FileRepository createFileRepositoryMock() {
         final FileRepository fileRepository = Mockito.mock(FileRepository.class);
 
-        when(fileRepository.findById(FILE_EXISTS)).thenReturn(Optional.of(existingFileEntity));
-        when(fileRepository.findById(FILE_IS_NOT_EXISTS)).thenReturn(Optional.empty());
+        ArrayList<Long> existingFileIds = new ArrayList<>();
+        existingFileIds.add(fileId);
 
-        when(fileRepository.existsById(FILE_EXISTS)).thenReturn(true);
-        when(fileRepository.existsById(FILE_IS_NOT_EXISTS)).thenReturn(false);
+        ArrayList<Long> nonExistingFileIds = new ArrayList<>();
 
-        when(fileRepository.getFiles(1)).thenReturn(List.of(existingFileEntity));
+        when(fileRepository.findFilesByUserIdAndName(user.getId(), FILE))
+                .thenReturn(existingFileIds);
+
+        when(fileRepository.findFilesByUserIdAndName(user.getId(), UNEXISTING_FILE))
+                .thenReturn(nonExistingFileIds);
+
+        when(fileRepository.findFilesById(fileId))
+                .thenReturn(file);
+
+        when(fileRepository.findFilesById(unexistingFileId))
+                .thenReturn(null);
+
+        when(fileRepository.findFilesByUserIdWithLimit(user.getId(), 1))
+                .thenReturn(List.of(file));
 
         return fileRepository;
     }
 
     @Test
-    void getFile() {
+    void getExistingFileTest() {
         final byte[] expectedFile = new byte[]{0, 1, 2};
-        final byte[] file = fileService.getFile(FILE_EXISTS);
+        final byte[] file = fileService.getFile(FILE, user).getContent();
         Assertions.assertArrayEquals(expectedFile, file);
     }
 
     @Test
-    void getFile_failed() {
-        Assertions.assertThrows(RuntimeException.class, () -> fileService.getFile(FILE_IS_NOT_EXISTS));
+    void getNonExistingFileTest() {
+        Assertions.assertThrows(RuntimeException.class,
+                () -> fileService.getFile(UNEXISTING_FILE, user));
     }
 
     @Test
-    void deleteFile() {
-        Assertions.assertDoesNotThrow(() -> fileService.deleteFile(FILE_EXISTS));
+    void deleteExistingFileTest() {
+        Assertions.assertDoesNotThrow(() -> fileService.deleteFile(FILE, user));
     }
 
     @Test
-    void deleteFile_failed() {
-        Assertions.assertThrows(RuntimeException.class, () -> fileService.deleteFile(FILE_IS_NOT_EXISTS));
+    void deleteNonExistingFileTest() {
+        Assertions.assertThrows(RuntimeException.class,
+                () -> fileService.deleteFile(UNEXISTING_FILE, user));
     }
 
     @Test
-    void editFileName() {
-        Assertions.assertDoesNotThrow(() -> fileService.editFileName(FILE_EXISTS, FILE_IS_NOT_EXISTS));
+    void renameExistingFileTest() {
+        Assertions.assertDoesNotThrow(() -> fileService.renameFile(FILE,
+                user, UNEXISTING_FILE));
     }
 
     @Test
-    void editFileName_failed() {
-        Assertions.assertThrows(RuntimeException.class, () -> fileService.editFileName(FILE_IS_NOT_EXISTS, FILE_EXISTS));
+    void renameNonExistingFileTest() {
+        Assertions.assertThrows(RuntimeException.class,
+                () -> fileService.renameFile(UNEXISTING_FILE,
+                        user, FILE));
     }
 
     @Test
     void getFileList() {
-        final List<FileDescriptionResponse> expectedFileList = List.of(new FileDescriptionResponse(FILE_EXISTS, 3));
-        final List<FileDescriptionResponse> fileList = fileService.getFileList(1);
-        Assertions.assertEquals(expectedFileList, fileList);
+        final byte[] expectedFileContent = new byte[]{0, 1, 2};
+        final FileEntity expectedFile = new FileEntity(ID, FILE,
+                expectedFileContent, user);
+        final List<FileEntity> expectedFileList = List.of(expectedFile);
+
+        final List<FileEntity> actualFileList = fileService.getAllFiles(user, 1);
+        Assertions.assertEquals(expectedFileList, actualFileList);
     }
 }
