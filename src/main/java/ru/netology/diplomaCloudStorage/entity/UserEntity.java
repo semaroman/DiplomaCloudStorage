@@ -1,20 +1,26 @@
 package ru.netology.diplomaCloudStorage.entity;
 
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
 
-import javax.persistence.Entity;
-import javax.persistence.Id;
-import javax.persistence.Table;
+import javax.persistence.*;
 
-@Entity
-@Table(name = "users")
 @Data
-@NoArgsConstructor
 @AllArgsConstructor
+@NoArgsConstructor
+@Builder
+@Entity
+@Table(name = "users", schema = "public")
 public class UserEntity {
     @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(nullable = false, unique = true)
+    private Long id;
+
+    @Getter
+    @Column(nullable = false, unique = true)
     private String login;
+
+    @Getter
+    @Column(nullable = false)
     private String password;
 }
