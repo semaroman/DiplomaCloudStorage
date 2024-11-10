@@ -1,53 +1,85 @@
 package ru.netology.diplomaCloudStorage.service;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import ru.netology.diplomaCloudStorage.dto.FileDescriptionResponse;
 import ru.netology.diplomaCloudStorage.entity.FileEntity;
+import ru.netology.diplomaCloudStorage.entity.UserEntity;
+import ru.netology.diplomaCloudStorage.exception.DuplicateFileNameException;
+import ru.netology.diplomaCloudStorage.exception.FileNotFoundException;
 import ru.netology.diplomaCloudStorage.repository.FileRepository;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 public class FileService {
     private final FileRepository fileRepository;
-
     public FileService(FileRepository fileRepository) {
         this.fileRepository = fileRepository;
     }
 
-    public synchronized void addFile(String filename, byte[] file) {
-        fileRepository.save(new FileEntity(filename, file));
+    public synchronized void addFile(String name, byte[] content, UserEntity user) {
+        log.info("User id {}", user.getId());
+        fileRepository.save(new FileEntity(name, content, user));
     }
 
-    public synchronized void deleteFile(String filename) {
-        if (!fileRepository.existsById(filename)) {
-            throw new RuntimeException("Файл " + filename + " не найден");
+    public synchronized void deleteFile(String name, UserEntity user) {
+        log.info("User id {}", user.getId());
+        List<Long> ids = fileRepository.findFilesByUserIdAndName(user.getId(), name);
+        if (ids.isEmpty()) {
+            log.info("File {} is not found for user {}", name, user.getLogin());
+            throw new FileNotFoundException("Файл не найден");
         }
-        fileRepository.deleteById(filename);
+
+        for (Long id : ids) {
+            log.info("File with id {} will be deleted", id);
+            fileRepository.deleteById(id);
+        }
     }
 
-    public byte[] getFile(String filename) {
-        final FileEntity file = getFileByName(filename);
-        return file.getFileContent();
+    public List<FileEntity> getAllFiles(UserEntity user, int limit) {
+        log.info("User id {}", user.getId());
+        return fileRepository.findFilesByUserIdWithLimit(user.getId(), limit);
     }
 
-    public synchronized void editFileName(String oldFilename, String newFilename) {
-        final FileEntity fileEntity = getFileByName(oldFilename);
-        final FileEntity newFileEntity = new FileEntity(newFilename, fileEntity.getFileContent());
-        fileRepository.delete(fileEntity);
-        fileRepository.save(newFileEntity);
+    public FileEntity getFile(String name, UserEntity user) {
+        List<Long> ids = fileRepository.findFilesByUserIdAndName(user.getId(), name);
+        if (ids.isEmpty()) {
+            log.info("File {} is not found for user {}", name, user.getLogin());
+            throw new FileNotFoundException("Файл не найден");
+        }
+
+        return fileRepository.findFilesById(ids.get(0));
     }
 
-    public List<FileDescriptionResponse> getFileList(int limit) {
-        final List<FileEntity> files = fileRepository.getFiles(limit);
-        return files.stream()
-                .map(file -> new FileDescriptionResponse(file.getFileName(), file.getFileContent().length))
-                .collect(Collectors.toList());
+    public synchronized void renameFile(String oldName, UserEntity user, String newName) {
+        List<Long> ids = fileRepository.findFilesByUserIdAndName(user.getId(), oldName);
+        if (ids.isEmpty()) {
+            log.info("File {} is not found for user {}", oldName, user.getLogin());
+            throw new FileNotFoundException("Файл не найден");
+        }
+
+        List<Long> newIds = fileRepository.findFilesByUserIdAndName(user.getId(), newName);
+        if (!newIds.isEmpty()) {
+            log.info("User {} already has file {}", user.getLogin(), newName);
+            throw new DuplicateFileNameException("У пользователя " + user.getId() +
+                    " уже есть файл " + newName);
+        }
+
+        FileEntity file = this.getFile(oldName, user);
+        file.setName(newName);
+        fileRepository.save(file);
     }
 
-    private FileEntity getFileByName(String filename) {
-        return fileRepository.findById(filename).orElseThrow(() ->
-                new RuntimeException("Файл " + filename + " не найден"));
+    public byte[] downloadFile(String filename, UserEntity user) {
+        List<Long> ids = fileRepository.findFilesByUserIdAndName(user.getId(), filename);
+        if (ids.isEmpty()) {
+            log.info("File {} is not found for user {}", filename, user.getLogin());
+            throw new FileNotFoundException("Файл не найден");
+        }
+
+        final FileEntity file = this.getFile(filename, user);
+        log.info("Download content for file {}", filename);
+        return file.getContent();
     }
 }
