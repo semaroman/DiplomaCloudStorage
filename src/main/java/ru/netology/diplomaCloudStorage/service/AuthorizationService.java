@@ -1,26 +1,21 @@
 package ru.netology.diplomaCloudStorage.service;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import ru.netology.diplomaCloudStorage.dto.LoginRequest;
-import ru.netology.diplomaCloudStorage.dto.LoginResponse;
-import ru.netology.diplomaCloudStorage.entity.TokenEntity;
 import ru.netology.diplomaCloudStorage.entity.UserEntity;
 import ru.netology.diplomaCloudStorage.exception.AuthorizationException;
 import ru.netology.diplomaCloudStorage.exception.BadCredentialsException;
 import ru.netology.diplomaCloudStorage.repository.TokenRepository;
 import ru.netology.diplomaCloudStorage.repository.UserRepository;
 
+import java.util.Optional;
 import java.util.Random;
 
+@Slf4j
 @Service
 public class AuthorizationService {
-    private final Logger logger = LoggerFactory.getLogger(AuthorizationService.class);
-
     private final UserRepository userRepository;
     private final TokenRepository tokenRepository;
-
     private final Random random = new Random();
 
     public AuthorizationService(UserRepository userRepository, TokenRepository tokenRepository) {
@@ -28,27 +23,62 @@ public class AuthorizationService {
         this.tokenRepository = tokenRepository;
     }
 
-    public LoginResponse login(LoginRequest loginInRequest) {
-        final String loginFromRequest = loginInRequest.getLogin();
-        final UserEntity user = userRepository.findById(loginFromRequest).orElseThrow(() ->
-                new BadCredentialsException("Пользователь " + loginFromRequest + " не найден"));
+    public String login(UserEntity user) {
+        final String login = user.getLogin();
+        final String password = user.getPassword();
 
-        if (!user.getPassword().equals(loginInRequest.getPassword())) {
-            throw new BadCredentialsException("Неправильный пароль для пользователя " + loginFromRequest);
+        log.info("Finding user {} in database", login);
+
+        final Optional<UserEntity> repositoryUser = userRepository.findUserByLogin(login);
+        if (repositoryUser.isEmpty()) {
+            log.info("User {} is not found", login);
+            throw new BadCredentialsException("Пользователь " + login + " не найден");
         }
-        final String authToken = String.valueOf(random.nextLong());
-        tokenRepository.save(new TokenEntity(authToken));
-        logger.info("Пользователь " + loginFromRequest + " вошёл по токену " + authToken);
-        return new LoginResponse(authToken);
+        log.info("User {} is found", login);
+
+        if (!repositoryUser.get().getPassword().equals(password)) {
+            log.info("User {} inputted incorrect password", login);
+            throw new BadCredentialsException("Неверный пароль");
+        }
+
+        final String token = String.valueOf(random.nextLong());
+        tokenRepository.putTokenAndLogin(token, login);
+
+        return token;
     }
 
-    public void logout(String authToken) {
-        tokenRepository.deleteById(authToken.split(" ")[1].trim());
+    public void logout(String token) {
+        tokenRepository.removeTokenAndLoginByToken(token);
+        log.info("Token {} was removed from hash map", token);
     }
 
-    public void checkToken(String authToken) {
-        if (!tokenRepository.existsById(authToken.split(" ")[1].trim())) {
-            throw new AuthorizationException();
+    public UserEntity checkToken(String token) {
+        String tokenWithoutBearer;
+        String[] tokenParts = token.split(" ");
+        if (tokenParts.length >= 2) {
+            tokenWithoutBearer = tokenParts[1];
+        } else {
+            tokenWithoutBearer = token;
         }
+
+        log.info("Token {}, token without bearer {}", token, tokenWithoutBearer);
+        log.info("Finding token {} in hash map", tokenWithoutBearer);
+
+        final Optional<String> login = tokenRepository.getLoginByToken(tokenWithoutBearer);
+        if (login.isEmpty()) {
+            log.info("Token {} is not found", tokenWithoutBearer);
+            throw new AuthorizationException("Пользователь не авторизован");
+        }
+
+        log.info("Token {} is found", tokenWithoutBearer);
+        log.info("User {}", login.get());
+
+        final Optional<UserEntity> user = userRepository.findUserByLogin(login.get());
+        if (user.isEmpty()) {
+            log.info("User {} is not found", login.get());
+            throw new AuthorizationException("Пользователь не найден");
+        }
+
+        return user.get();
     }
 }
